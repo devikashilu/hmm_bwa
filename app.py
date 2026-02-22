@@ -45,11 +45,11 @@ st.markdown("""
 class HiddenMarkovModel:
     """Hidden Markov Model with Baum-Welch Algorithm"""
     
-    def __init__(self, states, observations):
-        self.states = states
-        self.observations = observations
-        self.N = len(states)
-        self.M = len(observations)
+    def __init__(self, n_states, n_observations):
+        self.n_states = n_states
+        self.n_observations = n_observations
+        self.N = n_states
+        self.M = n_observations
         self._initialize_parameters()
     
     def _initialize_parameters(self):
@@ -63,33 +63,28 @@ class HiddenMarkovModel:
         self.A = np.array(A)
         self.B = np.array(B)
     
-    def observation_to_index(self, obs):
-        return [self.observations.index(o) for o in obs]
-    
     def forward_algorithm(self, obs_sequence):
         T = len(obs_sequence)
-        obs_idx = self.observation_to_index(obs_sequence)
         alpha = np.zeros((T, self.N))
         
-        alpha[0] = self.pi * self.B[:, obs_idx[0]]
+        alpha[0] = self.pi * self.B[:, obs_sequence[0]]
         
         for t in range(1, T):
             for j in range(self.N):
-                alpha[t, j] = np.sum(alpha[t-1] * self.A[:, j]) * self.B[j, obs_idx[t]]
+                alpha[t, j] = np.sum(alpha[t-1] * self.A[:, j]) * self.B[j, obs_sequence[t]]
         
         P = np.sum(alpha[T-1])
         return alpha, P
     
     def backward_algorithm(self, obs_sequence):
         T = len(obs_sequence)
-        obs_idx = self.observation_to_index(obs_sequence)
         beta = np.zeros((T, self.N))
         
         beta[T-1] = np.ones(self.N)
         
         for t in range(T-2, -1, -1):
             for i in range(self.N):
-                beta[t, i] = np.sum(self.A[i, :] * self.B[:, obs_idx[t+1]] * beta[t+1])
+                beta[t, i] = np.sum(self.A[i, :] * self.B[:, obs_sequence[t+1]] * beta[t+1])
         
         return beta
     
@@ -100,13 +95,12 @@ class HiddenMarkovModel:
     
     def compute_xi(self, alpha, beta, A, B, obs_sequence, P):
         T = len(obs_sequence)
-        obs_idx = self.observation_to_index(obs_sequence)
         xi = np.zeros((T-1, self.N, self.N))
         
         for t in range(T-1):
             for i in range(self.N):
                 for j in range(self.N):
-                    xi[t, i, j] = alpha[t, i] * A[i, j] * B[j, obs_idx[t+1]] * beta[t+1, j]
+                    xi[t, i, j] = alpha[t, i] * A[i, j] * B[j, obs_sequence[t+1]] * beta[t+1, j]
         
         if P > 0:
             xi = xi / P
@@ -146,10 +140,9 @@ class HiddenMarkovModel:
             
             # Update emission probabilities
             new_B = np.zeros((self.N, self.M))
-            obs_idx = self.observation_to_index(obs_sequence)
             for j in range(self.N):
                 for o_idx in range(self.M):
-                    mask = np.array(obs_idx) == o_idx
+                    mask = np.array(obs_sequence) == o_idx
                     if np.sum(mask) > 0:
                         new_B[j, o_idx] = np.sum(gamma[mask, j]) / np.sum(gamma[:, j])
             
@@ -177,20 +170,21 @@ class HiddenMarkovModel:
         return self.pi, self.A, self.B, iteration + 1, history
 
 
-def plot_transition_matrix(A, states):
+def plot_transition_matrix(A, n_states):
     """Plot transition matrix as heatmap"""
     fig, ax = plt.subplots(figsize=(8, 6))
     
+    states = [f"S{i}" for i in range(n_states)]
+    
     im = ax.imshow(A, cmap='Blues', aspect='auto')
     
-    ax.set_xticks(range(len(states)))
-    ax.set_yticks(range(len(states)))
+    ax.set_xticks(range(n_states))
+    ax.set_yticks(range(n_states))
     ax.set_xticklabels(states)
     ax.set_yticklabels(states)
     
-    # Add values to cells
-    for i in range(len(states)):
-        for j in range(len(states)):
+    for i in range(n_states):
+        for j in range(n_states):
             text = ax.text(j, i, f'{A[i, j]:.4f}',
                           ha="center", va="center", color="black" if A[i, j] < 0.5 else "white")
     
@@ -202,20 +196,22 @@ def plot_transition_matrix(A, states):
     return fig
 
 
-def plot_emission_matrix(B, states, observations):
+def plot_emission_matrix(B, n_states, n_observations):
     """Plot emission matrix as heatmap"""
     fig, ax = plt.subplots(figsize=(8, 6))
     
+    states = [f"S{i}" for i in range(n_states)]
+    observations = [f"O{i}" for i in range(n_observations)]
+    
     im = ax.imshow(B, cmap='Greens', aspect='auto')
     
-    ax.set_xticks(range(len(observations)))
-    ax.set_yticks(range(len(states)))
+    ax.set_xticks(range(n_observations))
+    ax.set_yticks(range(n_states))
     ax.set_xticklabels(observations)
     ax.set_yticklabels(states)
     
-    # Add values to cells
-    for i in range(len(states)):
-        for j in range(len(observations)):
+    for i in range(n_states):
+        for j in range(n_observations):
             text = ax.text(j, i, f'{B[i, j]:.4f}',
                           ha="center", va="center", color="black" if B[i, j] < 0.5 else "white")
     
@@ -227,36 +223,31 @@ def plot_emission_matrix(B, states, observations):
     return fig
 
 
-def plot_hmm_graph(states, A, B, pi, observations):
+def plot_hmm_graph(n_states, A, B, pi, n_observations):
     """Plot HMM as a graph"""
     fig, ax = plt.subplots(figsize=(12, 8))
     
     G = nx.DiGraph()
     
-    # Add nodes
+    states = [f"S{i}" for i in range(n_states)]
     for state in states:
         G.add_node(state)
     
-    # Get positions in a circle
     pos = {}
-    n = len(states)
     for i, state in enumerate(states):
-        angle = 2 * np.pi * i / n - np.pi/2
+        angle = 2 * np.pi * i / n_states - np.pi/2
         pos[state] = (0.5 + 0.35 * np.cos(angle), 0.5 + 0.35 * np.sin(angle))
     
-    # Draw nodes
-    node_colors = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6'][:n]
+    node_colors = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6'][:n_states]
     nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=5000, ax=ax)
     nx.draw_networkx_labels(G, pos, font_size=12, font_weight='bold', ax=ax)
     
-    # Draw edges with weights
     for i, from_state in enumerate(states):
         for j, to_state in enumerate(states):
             if A[i, j] > 0.01:
                 nx.draw_networkx_edges(G, pos, edgelist=[(from_state, to_state)],
                                        width=A[i, j] * 3, alpha=0.6, ax=ax)
     
-    # Add edge labels
     edge_labels = {}
     for i, from_state in enumerate(states):
         for j, to_state in enumerate(states):
@@ -264,10 +255,10 @@ def plot_hmm_graph(states, A, B, pi, observations):
     
     nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=8, ax=ax)
     
-    # Add emission info
+    observations = [f"O{i}" for i in range(n_observations)]
     emission_text = "Emission Probabilities:\n"
     for i, state in enumerate(states):
-        emission_text += f"{state}: " + ", ".join([f"{obs}:{B[i,j]:.2f}" for j, obs in enumerate(observations)]) + "\n"
+        emission_text += f"{state}: " + ", ".join([f"{observations[j]}:{B[i,j]:.2f}" for j in range(n_observations)]) + "\n"
     
     ax.annotate(emission_text, xy=(0.5, -0.1), xycoords='axes fraction',
                 fontsize=10, ha='center', va='top',
@@ -279,52 +270,61 @@ def plot_hmm_graph(states, A, B, pi, observations):
     return fig
 
 
-def plot_convergence(history):
+def plot_convergence(history, n_states):
     """Plot convergence of parameters"""
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     
-    iterations = range(len(history['log_likelihood']))
+    # Skip initial state in history (which is before training)
+    n_iterations = len(history['log_likelihood'])
+    iterations = range(n_iterations)
     
     # Log likelihood
-    if len(iterations) > 0:
+    if n_iterations > 0:
         axes[0].plot(iterations, history['log_likelihood'], 'b-o', markersize=4)
         axes[0].set_xlabel('Iteration')
         axes[0].set_ylabel('Log Likelihood')
         axes[0].set_title('Log Likelihood')
         axes[0].grid(True, alpha=0.3)
     
-    # Initial probabilities
-    for i in range(len(history['pi'][0])):
-        pi_values = [h[i] for h in history['pi']]
-        axes[1].plot(iterations, pi_values, '-o', markersize=3)
+    # Initial probabilities - use only the values after each iteration
+    pi_history = history['pi'][1:]  # Skip initial state
+    for i in range(n_states):
+        pi_values = [h[i] for h in pi_history]
+        if len(pi_values) > 0:
+            axes[1].plot(range(len(pi_values)), pi_values, '-o', markersize=3, label=f'S{i}')
     axes[1].set_xlabel('Iteration')
     axes[1].set_ylabel('Probability')
     axes[1].set_title('Initial Probabilities (π)')
+    axes[1].legend()
     axes[1].grid(True, alpha=0.3)
     
-    # Emission probabilities (first observation)
-    for i in range(len(history['B'][0])):
-        B_values = [h[i, 0] for h in history['B']]
-        axes[2].plot(iterations, B_values, '-o', markersize=3)
+    # Emission probabilities
+    B_history = history['B'][1:]
+    for i in range(n_states):
+        B_values = [h[i, 0] for h in B_history]
+        if len(B_values) > 0:
+            axes[2].plot(range(len(B_values)), B_values, '-o', markersize=3, label=f'S{i}')
     axes[2].set_xlabel('Iteration')
     axes[2].set_ylabel('Probability')
     axes[2].set_title('Emission Probabilities')
+    axes[2].legend()
     axes[2].grid(True, alpha=0.3)
     
     plt.tight_layout()
     return fig
 
 
-def plot_state_responsibilities(gamma, states, observations):
+def plot_state_responsibilities(gamma, n_states, obs_sequence):
     """Plot state responsibilities over time"""
     fig, ax = plt.subplots(figsize=(12, 4))
     
-    T = len(observations)
+    T = len(obs_sequence)
     x = range(T)
     
     bottom = np.zeros(T)
-    colors = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6'][:len(states)]
+    colors = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6'][:n_states]
     
+    states = [f"S{i}" for i in range(n_states)]
     for i, state in enumerate(states):
         ax.bar(x, gamma[:, i], bottom=bottom, label=state, color=colors[i], alpha=0.8)
         bottom += gamma[:, i]
@@ -333,7 +333,7 @@ def plot_state_responsibilities(gamma, states, observations):
     ax.set_ylabel('Probability')
     ax.set_title('State Responsibilities Over Time')
     ax.set_xticks(x)
-    ax.set_xticklabels([f'{t+1}\n({obs})' for t, obs in enumerate(observations)])
+    ax.set_xticklabels([f'{t+1}\n(O{obs})' for t, obs in enumerate(obs_sequence)])
     ax.legend()
     ax.grid(True, alpha=0.3, axis='y')
     
@@ -347,17 +347,16 @@ def main():
     # Sidebar - Input Parameters
     st.sidebar.header("📥 Input Parameters")
     
-    # Hidden States
-    states_input = st.sidebar.text_input("Hidden States (comma-separated)", "Rainy,Sunny")
-    states = [s.strip() for s in states_input.split(',') if s.strip()]
+    # Number of Hidden States
+    n_states = st.sidebar.number_input("Number of Hidden States (N)", min_value=1, value=2, step=1)
     
-    # Observations
-    observations_input = st.sidebar.text_input("Observations (comma-separated)", "Walk,Shop")
-    observations = [o.strip() for o in observations_input.split(',') if o.strip()]
+    # Number of Observations
+    n_observations = st.sidebar.number_input("Number of Observations (M)", min_value=1, value=2, step=1)
     
     # Observation Sequence
     st.sidebar.header("📝 Observation Sequence")
-    obs_input = st.sidebar.text_input("Enter observations", "Walk,Shop,Walk,Shop,Shop")
+    st.sidebar.markdown("Enter observations as numbers (0, 1, 2, ...)")
+    obs_input = st.sidebar.text_input("Observation sequence (comma-separated)", "0,1,0,1,1")
     
     # Algorithm Parameters
     st.sidebar.header("⚙️ Algorithm Parameters")
@@ -368,57 +367,62 @@ def main():
     st.sidebar.header("📦 Initial Parameters (Optional)")
     use_custom_init = st.sidebar.checkbox("Use custom initial parameters", value=False)
     
-    if not states or not observations:
-        st.error("Please enter at least one state and one observation.")
+    if n_states < 1 or n_observations < 1:
+        st.error("Please enter valid number of states and observations.")
         return
     
     if not obs_input:
         st.error("Please enter an observation sequence.")
         return
     
-    obs_seq = [o.strip() for o in obs_input.split(',')]
-    
-    # Validate observations
-    valid_obs = all(o in observations for o in obs_seq)
-    if not valid_obs:
-        st.error(f"Invalid observations! Available: {observations}")
+    # Parse observation sequence as numbers
+    try:
+        obs_seq = [int(o.strip()) for o in obs_input.split(',')]
+        # Validate observations are in range
+        if any(o < 0 or o >= n_observations for o in obs_seq):
+            st.error(f"Observations must be between 0 and {n_observations-1}")
+            return
+    except ValueError:
+        st.error("Please enter observations as numbers separated by commas.")
         return
     
     # Initialize HMM
-    hmm = HiddenMarkovModel(states, observations)
+    hmm = HiddenMarkovModel(n_states, n_observations)
     
     # Set custom initial parameters if requested
-    if use_custom_init and len(states) > 0:
+    if use_custom_init:
+        states = [f"S{i}" for i in range(n_states)]
+        observations = [f"O{i}" for i in range(n_observations)]
+        
         st.sidebar.markdown("### Initial Probabilities (π)")
         pi = []
-        for i, state in enumerate(states):
-            val = st.sidebar.slider(f"π({state})", 0.0, 1.0, 1.0/len(states), 0.01)
+        for i in range(n_states):
+            val = st.sidebar.slider(f"π(S{i})", 0.0, 1.0, 1.0/n_states, 0.01)
             pi.append(val)
         pi = np.array(pi) / sum(pi)
         
         st.sidebar.markdown("### Transition Matrix (A)")
-        A = np.zeros((len(states), len(states)))
-        for i, from_state in enumerate(states):
+        A = np.zeros((n_states, n_states))
+        for i in range(n_states):
             row_sum = 0
-            for j, to_state in enumerate(states):
-                if j < len(states) - 1:
-                    val = st.sidebar.slider(f"A({from_state}→{to_state})", 0.0, 1.0, 0.5, 0.01)
+            for j in range(n_states):
+                if j < n_states - 1:
+                    val = st.sidebar.slider(f"A(S{i}→S{j})", 0.0, 1.0, 0.5, 0.01)
                     A[i, j] = val
                     row_sum += val
             A[i, -1] = max(0, 1 - row_sum)
         
         st.sidebar.markdown("### Emission Matrix (B)")
-        B = np.zeros((len(states), len(observations)))
-        for i, state in enumerate(states):
+        B = np.zeros((n_states, n_observations))
+        for i in range(n_states):
             row_sum = 0
-            for j, obs in enumerate(observations):
-                if j < len(observations) - 1:
-                    val = st.sidebar.slider(f"B({state}|{obs})", 0.0, 1.0, 0.5, 0.01)
+            for j in range(n_observations):
+                if j < n_observations - 1:
+                    val = st.sidebar.slider(f"B(S{i}|O{j})", 0.0, 1.0, 0.5, 0.01)
                     B[i, j] = val
                     row_sum += val
             B[i, -1] = max(0, 1 - row_sum)
         
-        # Normalize
         A = A / A.sum(axis=1, keepdims=True)
         B = B / B.sum(axis=1, keepdims=True)
         hmm.set_parameters(pi, A, B)
@@ -435,6 +439,8 @@ def main():
         # Display Results
         st.markdown("## 📊 Results")
         
+        states = [f"S{i}" for i in range(n_states)]
+        
         # Initial Probabilities
         st.markdown("### Initial Probabilities (π)")
         for i, state in enumerate(states):
@@ -446,20 +452,21 @@ def main():
         with col1:
             st.write("From \\ To", " | ".join([f"{s:>8}" for s in states]))
             for i, state in enumerate(states):
-                st.write(f"{state:>4}", " | ".join([f"{new_A[i,j]:>8.4f}" for j in range(len(states))]))
+                st.write(f"{state:>4}", " | ".join([f"{new_A[i,j]:>8.4f}" for j in range(n_states)]))
         with col2:
-            fig = plot_transition_matrix(new_A, states)
+            fig = plot_transition_matrix(new_A, n_states)
             st.pyplot(fig)
         
         # Emission Matrix
+        observations = [f"O{i}" for i in range(n_observations)]
         st.markdown("### Emission Matrix (B)")
         col1, col2 = st.columns([1, 2])
         with col1:
             st.write("State \\ Obs", " | ".join([f"{o:>8}" for o in observations]))
             for i, state in enumerate(states):
-                st.write(f"{state:>4}", " | ".join([f"{new_B[i,j]:>8.4f}" for j in range(len(observations))]))
+                st.write(f"{state:>4}", " | ".join([f"{new_B[i,j]:>8.4f}" for j in range(n_observations)]))
         with col2:
-            fig = plot_emission_matrix(new_B, states, observations)
+            fig = plot_emission_matrix(new_B, n_states, n_observations)
             st.pyplot(fig)
         
         # Visualizations
@@ -467,7 +474,7 @@ def main():
         
         # HMM Structure
         st.markdown("#### HMM Structure")
-        fig = plot_hmm_graph(states, new_A, new_B, new_pi, observations)
+        fig = plot_hmm_graph(n_states, new_A, new_B, new_pi, n_observations)
         st.pyplot(fig)
         
         # State Responsibilities
@@ -476,12 +483,12 @@ def main():
         gamma = hmm.compute_gamma(alpha, beta, P)
         
         st.markdown("#### State Responsibilities")
-        fig = plot_state_responsibilities(gamma, states, obs_seq)
+        fig = plot_state_responsibilities(gamma, n_states, obs_seq)
         st.pyplot(fig)
         
         # Convergence
         st.markdown("#### Convergence Progress")
-        fig = plot_convergence(history)
+        fig = plot_convergence(history, n_states)
         st.pyplot(fig)
         
         # Log likelihood
