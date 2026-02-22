@@ -163,9 +163,8 @@ class HiddenMarkovModel:
             history['pi'].append(self.pi.copy())
             history['A'].append(self.A.copy())
             history['B'].append(self.B.copy())
-            
-            if pi_change < tolerance and A_change < tolerance and B_change < tolerance:
-                break
+        
+        # Always complete all iterations (no early stopping)
         
         return self.pi, self.A, self.B, iteration + 1, history
 
